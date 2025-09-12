@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) exit;
 require __DIR__ . '/inc/plugin-update-checker/plugin-update-checker.php';
 
 $cmdb_updater = Puc_v4_Factory::buildUpdateChecker(
-    'https://github.com/YOUR-GH-ORG-OR-USER/cmdb-endpoints', // repo URL
+    'https://github.com/infoitteam/cmdb-endpoints.git', // repo URL
     __FILE__,                                                // main plugin file
     'cmdb-endpoints'                                         // plugin slug = folder name
 );
