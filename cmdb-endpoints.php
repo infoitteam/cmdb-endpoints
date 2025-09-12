@@ -13,31 +13,24 @@ if (!defined('ABSPATH')) exit;
 //   define('CMDB_SHARED_SECRET', 'your-strong-secret');
 // Optional: define('CMDB_INCLUDE_SERVICES', 'stripe,bloomreach');
 
-// === Self-updates via GitHub Releases ===
-require __DIR__ . '/inc/plugin-update-checker/plugin-update-checker.php';
+/// Require the library (adjust path if needed).
+require_once __DIR__ . '/inc/plugin-update-checker/plugin-update-checker.php';
 
-$cmdb_updater = Puc_v4_Factory::buildUpdateChecker(
-    'https://github.com/infoitteam/cmdb-endpoints.git', // repo URL
-    __FILE__,                                                // main plugin file
-    'cmdb-endpoints'                                         // plugin slug = folder name
+// Build the updater for this plugin.
+$updateChecker = Puc_v4_Factory::buildUpdateChecker(
+    'https://github.com/infoitteam/cmdb-endpoints', // Your repo URL (no .git)
+    __FILE__,                                       // Main plugin file
+    'cmdb-endpoints'                                // Plugin slug
 );
 
-// (optional) Use a specific branch for updates (default = main)
-$cmdb_updater->setBranch('main');
+// Branch you release from (usually main)
+$updateChecker->setBranch('main');
 
-// Use GitHub “Releases” (attach ZIP as a release asset)
-$cmdb_updater->getVcsApi()->enableReleaseAssets();
+// Prefer GitHub Release assets (a .zip you attach to the Release)
+$updateChecker->getVcsApi()->enableReleaseAssets();
 
-// (optional) Private repo auth token: define in wp-config.php as CMDB_GH_TOKEN
-if (defined('CMDB_GH_TOKEN') && CMDB_GH_TOKEN) {
-    $cmdb_updater->setAuthentication(CMDB_GH_TOKEN);
-}
-
-// (optional) Default this plugin to auto-update
-add_filter('auto_update_plugin', function ($update, $item) {
-    return ($item->slug === 'cmdb-endpoints') ? true : $update;
-}, 10, 2);
-
+// If the repo is private, uncomment and add a token:
+// $updateChecker->setAuthentication('ghp_XXXXXXXXXXXXXXXXXXXXXXXX');
 
 
 
