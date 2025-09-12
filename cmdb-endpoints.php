@@ -2,8 +2,7 @@
 /**
  * Plugin Name: CMDB Endpoints & Webhooks + Admin Snapshot
  * Description: Exposes /cmdb/v1/snapshot, pushes webhooks on changes, inventories plugins/themes (active+inactive), update/auto-update flags, and adds an Admin Snapshot page (Tools → CMDB Snapshot).
- * Added in 1.3.0 /user to allow calling from google scripts to retrieve the user list
- * Version: 1.3.0
+ * Version: 1.4.0
  * Author: Steve O'Rourke
  */
 
@@ -13,6 +12,34 @@ if (!defined('ABSPATH')) exit;
 //   define('CMDB_WEBHOOK_URL', 'https://script.google.com/macros/s/XXXXX/exec?site=' . rawurlencode(site_url()));
 //   define('CMDB_SHARED_SECRET', 'your-strong-secret');
 // Optional: define('CMDB_INCLUDE_SERVICES', 'stripe,bloomreach');
+
+// === Self-updates via GitHub Releases ===
+require __DIR__ . '/inc/plugin-update-checker/plugin-update-checker.php';
+
+$cmdb_updater = Puc_v4_Factory::buildUpdateChecker(
+    'https://github.com/YOUR-GH-ORG-OR-USER/cmdb-endpoints', // repo URL
+    __FILE__,                                                // main plugin file
+    'cmdb-endpoints'                                         // plugin slug = folder name
+);
+
+// (optional) Use a specific branch for updates (default = main)
+$cmdb_updater->setBranch('main');
+
+// Use GitHub “Releases” (attach ZIP as a release asset)
+$cmdb_updater->getVcsApi()->enableReleaseAssets();
+
+// (optional) Private repo auth token: define in wp-config.php as CMDB_GH_TOKEN
+if (defined('CMDB_GH_TOKEN') && CMDB_GH_TOKEN) {
+    $cmdb_updater->setAuthentication(CMDB_GH_TOKEN);
+}
+
+// (optional) Default this plugin to auto-update
+add_filter('auto_update_plugin', function ($update, $item) {
+    return ($item->slug === 'cmdb-endpoints') ? true : $update;
+}, 10, 2);
+
+
+
 
 /** Utilities **/
 function cmdb__require_wp_admin_files() {
