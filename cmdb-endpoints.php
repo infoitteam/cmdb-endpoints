@@ -2,7 +2,7 @@
 /**
  * Plugin Name: CMDB Endpoints & Webhooks + Admin Snapshot
  * Description: Exposes /cmdb/v1/snapshot, pushes webhooks on changes, inventories plugins/themes (active+inactive), update/auto-update flags, and adds an Admin Snapshot page (Tools → CMDB Snapshot).
- * Version: 1.4.1
+ * Version: 1.4.2
  * Author: Steve O'Rourke
  * Text Domain: cmdb-endpoints
  */
