@@ -64,20 +64,22 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $ZipPath = Join-Path $OutDir ("$PluginSlug-$Version.zip")
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 
-# Write zip with normalized entry names
 $zipStream = [System.IO.File]::Open($ZipPath, [System.IO.FileMode]::CreateNew)
 $zip = New-Object System.IO.Compression.ZipArchive($zipStream, [System.IO.Compression.ZipArchiveMode]::Create)
 
-# Add files
+# Build entries using the explicit ZipFileExtensions call (works across PS 5/7)
 $baseLen = $StageDir.Length + 1
 Get-ChildItem -Path $StageDir -Recurse -File | ForEach-Object {
-  $rel = $_.FullName.Substring($baseLen) -replace '\\','/'             # force forward slashes
+  $rel = $_.FullName.Substring($baseLen) -replace '\\','/'   # normalize
   $entryPath = "$PluginSlug/$rel"
-  $null = $zip.CreateEntryFromFile($_.FullName, $entryPath, [System.IO.Compression.CompressionLevel]::Optimal)
+  [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+    $zip, $_.FullName, $entryPath, [System.IO.Compression.CompressionLevel]::Optimal
+  ) | Out-Null
 }
 
 $zip.Dispose()
 $zipStream.Dispose()
+
 
 # --- Sanity check ---
 $ok = $true
