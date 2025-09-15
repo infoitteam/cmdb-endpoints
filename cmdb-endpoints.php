@@ -1,4 +1,4 @@
-<<?php
+<?php
 /**
  * Plugin Name: CMDB Endpoints & Webhooks + Admin Snapshot
  * Description: Exposes /cmdb/v1/snapshot, pushes webhooks on changes, inventories plugins/themes (active+inactive), update/auto-update flags, and adds an Admin Snapshot page (Tools → CMDB Snapshot).
