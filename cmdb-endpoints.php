@@ -22,7 +22,7 @@ if ( file_exists($__puc_loader) ) {
     // Prefer namespaced factory (PUC v5+). Try v5pN first, then v5 fallback.
     if ( class_exists('\YahnisElsts\PluginUpdateChecker\v5p6\PucFactory') ) {
         $cmdb_update_checker = \YahnisElsts\PluginUpdateChecker\v5p6\PucFactory::buildUpdateChecker(
-            ''https://github.com/infoitteam/cmdb-endpoints', // <-- your repo
+            'https://github.com/infoitteam/cmdb-endpoints', // <-- your repo
             __FILE__,
             'cmdb-endpoints'
         );
@@ -30,14 +30,14 @@ if ( file_exists($__puc_loader) ) {
         // $cmdb_update_checker->setAuthentication('ghp_xxx'); // if private repo
     } elseif ( class_exists('\YahnisElsts\PluginUpdateChecker\v5\PucFactory') ) {
         $cmdb_update_checker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
-            ''https://github.com/infoitteam/cmdb-endpoints'', __FILE__, 'cmdb-endpoints'
+            'https://github.com/infoitteam/cmdb-endpoints', __FILE__, 'cmdb-endpoints'
         );
         $cmdb_update_checker->setBranch('main');
         // $cmdb_update_checker->setAuthentication('ghp_xxx');
     } elseif ( class_exists('Puc_v5_Factory') ) {
         // Legacy alias, if present
         $cmdb_update_checker = Puc_v5_Factory::buildUpdateChecker(
-            ''https://github.com/infoitteam/cmdb-endpoints'', __FILE__, 'cmdb-endpoints'
+            'https://github.com/infoitteam/cmdb-endpoints', __FILE__, 'cmdb-endpoints'
         );
         $cmdb_update_checker->setBranch('main');
         // $cmdb_update_checker->setAuthentication('ghp_xxx');
