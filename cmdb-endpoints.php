@@ -1,36 +1,29 @@
-<?php
+<<?php
 /**
  * Plugin Name: CMDB Endpoints & Webhooks + Admin Snapshot
  * Description: Exposes /cmdb/v1/snapshot, pushes webhooks on changes, inventories plugins/themes (active+inactive), update/auto-update flags, and adds an Admin Snapshot page (Tools → CMDB Snapshot).
  * Version: 1.4.0
  * Author: Steve O'Rourke
+ * Text Domain: cmdb-endpoints
  */
 
 if (!defined('ABSPATH')) exit;
 
-// In wp-config.php per-site, define:
-//   define('CMDB_WEBHOOK_URL', 'https://script.google.com/macros/s/XXXXX/exec?site=' . rawurlencode(site_url()));
-//   define('CMDB_SHARED_SECRET', 'your-strong-secret');
-// Optional: define('CMDB_INCLUDE_SERVICES', 'stripe,bloomreach');
+// Always use forward slashes here – they’re cross-platform.
+require_once plugin_dir_path(__FILE__) . 'inc/plugin-update-checker/plugin-update-checker.php';
 
-/// Require the library (adjust path if needed).
-require_once __DIR__ . '/inc/plugin-update-checker/plugin-update-checker.php';
-
-// Build the updater for this plugin.
-$updateChecker = Puc_v4_Factory::buildUpdateChecker(
-    'https://github.com/infoitteam/cmdb-endpoints', // Your repo URL (no .git)
-    __FILE__,                                       // Main plugin file
-    'cmdb-endpoints'                                // Plugin slug
+// If you host the plugin on GitHub, use the GitHub provider:
+$cmdb_update_checker = Puc_v5_Factory::buildUpdateChecker(
+    'https://github.com/infoitteam/cmdb-endpoints',            // repo home (not zip)
+    __FILE__,                                                  // main plugin file
+    'cmdb-endpoints'                                           // plugin slug
 );
 
-// Branch you release from (usually main)
-$updateChecker->setBranch('main');
+// Branch to monitor (usually 'main' or 'master'):
+$cmdb_update_checker->setBranch('main');
 
-// Prefer GitHub Release assets (a .zip you attach to the Release)
-$updateChecker->getVcsApi()->enableReleaseAssets();
-
-// If the repo is private, uncomment and add a token:
-// $updateChecker->setAuthentication('ghp_XXXXXXXXXXXXXXXXXXXXXXXX');
+// If the repo is private, uncomment and add a token with 'repo' scope:
+// $cmdb_update_checker->setAuthentication('ghp_xxxPERSONALACCESSTOKENxxx');
 
 
 
