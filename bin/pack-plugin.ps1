@@ -34,7 +34,7 @@ New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 
 $excludeDirs = @(
   '.git','.github','.vscode','.idea','.gitlab',
-  'bin','release','node_modules','vendor','tests','test'
+  'bin','release','node_modules','/vendor','tests','test'
 )
 $excludeFiles = @(
   '.gitignore','.gitattributes','composer.lock','package-lock.json',
