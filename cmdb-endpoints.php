@@ -8,10 +8,6 @@
  */
 
 if ( ! defined('ABSPATH') ) exit;
-<?php
-// ... your header ...
-
-if ( ! defined('ABSPATH') ) exit;
 
 /**
  * Ensure Markdown parser exists for PUC GitHub release notes
