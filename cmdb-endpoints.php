@@ -9,23 +9,50 @@
 
 if (!defined('ABSPATH')) exit;
 
-// Always use forward slashes here – they’re cross-platform.
-require_once plugin_dir_path(__FILE__) . 'inc/plugin-update-checker/plugin-update-checker.php';
+if ( ! defined('ABSPATH') ) exit;
 
-// If you host the plugin on GitHub, use the GitHub provider:
-$cmdb_update_checker = Puc_v5_Factory::buildUpdateChecker(
-    'https://github.com/infoitteam/cmdb-endpoints',            // repo home (not zip)
-    __FILE__,                                                  // main plugin file
-    'cmdb-endpoints'                                           // plugin slug
-);
+/**
+ * Plugin Update Checker bootstrap (robust for v5+)
+ */
+$__puc_loader = __DIR__ . '/inc/plugin-update-checker/plugin-update-checker.php';
 
-// Branch to monitor (usually 'main' or 'master'):
-$cmdb_update_checker->setBranch('main');
+if ( file_exists($__puc_loader) ) {
+    require_once $__puc_loader;
 
-// If the repo is private, uncomment and add a token with 'repo' scope:
-// $cmdb_update_checker->setAuthentication('ghp_xxxPERSONALACCESSTOKENxxx');
-
-
+    // Prefer namespaced factory (PUC v5+). Try v5pN first, then v5 fallback.
+    if ( class_exists('\YahnisElsts\PluginUpdateChecker\v5p6\PucFactory') ) {
+        $cmdb_update_checker = \YahnisElsts\PluginUpdateChecker\v5p6\PucFactory::buildUpdateChecker(
+            ''https://github.com/infoitteam/cmdb-endpoints', // <-- your repo
+            __FILE__,
+            'cmdb-endpoints'
+        );
+        $cmdb_update_checker->setBranch('main');           // <-- your branch
+        // $cmdb_update_checker->setAuthentication('ghp_xxx'); // if private repo
+    } elseif ( class_exists('\YahnisElsts\PluginUpdateChecker\v5\PucFactory') ) {
+        $cmdb_update_checker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
+            ''https://github.com/infoitteam/cmdb-endpoints'', __FILE__, 'cmdb-endpoints'
+        );
+        $cmdb_update_checker->setBranch('main');
+        // $cmdb_update_checker->setAuthentication('ghp_xxx');
+    } elseif ( class_exists('Puc_v5_Factory') ) {
+        // Legacy alias, if present
+        $cmdb_update_checker = Puc_v5_Factory::buildUpdateChecker(
+            ''https://github.com/infoitteam/cmdb-endpoints'', __FILE__, 'cmdb-endpoints'
+        );
+        $cmdb_update_checker->setBranch('main');
+        // $cmdb_update_checker->setAuthentication('ghp_xxx');
+    } else {
+        add_action('admin_notices', function () {
+            echo '<div class="notice notice-error"><p><strong>CMDB Endpoints:</strong> PUC loaded, but no factory class found. Check inc/plugin-update-checker version.</p></div>';
+        });
+        error_log('CMDB Endpoints: PUC loader included but no PucFactory class found.');
+    }
+} else {
+    add_action('admin_notices', function () {
+        echo '<div class="notice notice-error"><p><strong>CMDB Endpoints:</strong> Missing <code>inc/plugin-update-checker/plugin-update-checker.php</code>. Rebuild/reinstall the plugin.</p></div>';
+    });
+    error_log('CMDB Endpoints: plugin-update-checker.php missing at ' . $__puc_loader);
+}
 
 /** Utilities **/
 function cmdb__require_wp_admin_files() {
