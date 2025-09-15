@@ -11,10 +11,13 @@ $MainFile   = 'cmdb-endpoints.php'  # file with "Version:" header
 
 # --- Paths (absolute, relative to script) ---
 $ScriptRoot  = Split-Path -Parent $PSCommandPath
-$ProjectRoot = $ScriptRoot         # adjust if your script lives elsewhere
+# If your script lives in /bin but repo root is the parent, uncomment next line:
+# $ProjectRoot = Split-Path -Parent $ScriptRoot
+# If your script already lives at repo root, use:
+$ProjectRoot = Split-Path -Parent $ScriptRoot
 $OutDir      = Join-Path $ProjectRoot 'bin\release'
 $TempRoot    = Join-Path ([IO.Path]::GetTempPath()) ("$PluginSlug-build-" + (Get-Date -Format 'yyyyMMddHHmmss'))
-$StageDir    = Join-Path $TempRoot $PluginSlug      # <- NOTE: we stage into ...\<temp>\cmdb-endpoints\
+$StageDir    = Join-Path $TempRoot $PluginSlug      # we stage into ...\<temp>\cmdb-endpoints\
 
 # --- Ensure output dir ---
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
@@ -34,9 +37,15 @@ $excludeFiles = @('.gitignore', '.gitattributes', 'composer.lock', 'package-lock
 
 # Build robocopy args with proper quoting
 $xdArgs = @()
-foreach ($d in $excludeDirs) { $xdArgs += '/XD'; $xdArgs += "`"$([IO.Path]::Combine($ProjectRoot, $d))`"" }
+foreach ($d in $excludeDirs) {
+  $xdArgs += '/XD'
+  $xdArgs += "`"$([IO.Path]::Combine($ProjectRoot, $d))`""
+}
 $xfArgs = @()
-foreach ($f in $excludeFiles) { $xfArgs += '/XF'; $xfArgs += "`"$([IO.Path]::Combine($ProjectRoot, $f))`"" }
+foreach ($f in $excludeFiles) {
+  $xfArgs += '/XF'
+  $xfArgs += "`"$([IO.Path]::Combine($ProjectRoot, $f))`""
+}
 
 $robocopyArgs = @(
   "`"$ProjectRoot`"",
@@ -54,21 +63,25 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $ZipPath = Join-Path $OutDir ("$PluginSlug-$Version.zip")
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 
-# CRITICAL: zip $TempRoot (which contains the cmdb-endpoints folder), not $StageDir.
+# IMPORTANT: zip $TempRoot (which contains the cmdb-endpoints folder), not $StageDir.
 [System.IO.Compression.ZipFile]::CreateFromDirectory($TempRoot, $ZipPath)
 
-# --- Optional: quick sanity check to ensure paths aren't flattened/backslashed ---
+# --- Sanity check: ensure archive entries use forward slashes and are rooted in cmdb-endpoints/ ---
 $ok = $true
 $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
 foreach ($e in $zip.Entries) {
-  if ($e.FullName -match '\\') { $ok = $false; Write-Warning "Entry has backslash: $($e.FullName)" }
-  if ($e.FullName -notmatch "^$PluginSlug/") { $ok = $false; Write-Warning "Entry not rooted in $PluginSlug/: $($e.FullName)" }
+  if ($e.FullName -match '\\') { $ok = $false; Write-Warning ("Entry has backslash: " + $e.FullName) }
+  if ($e.FullName -notmatch "^$PluginSlug/") { $ok = $false; Write-Warning ("Entry not rooted in " + $PluginSlug + "/: " + $e.FullName) }
 }
 $zip.Dispose()
 
 Write-Host ""
-Write-Host "Built: $ZipPath"
-if ($ok) { Write-Host "ZIP structure looks good ✔" } else { Write-Warning "ZIP structure had anomalies (see warnings above)" }
+Write-Host ("Built: " + $ZipPath)
+if ($ok) {
+  Write-Host "ZIP structure looks good"
+} else {
+  Write-Warning "ZIP structure had anomalies (see warnings above)"
+}
 
 # --- Cleanup ---
 Remove-Item $TempRoot -Recurse -Force
