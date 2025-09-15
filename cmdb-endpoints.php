@@ -8,9 +8,28 @@
  */
 
 if ( ! defined('ABSPATH') ) exit;
+<?php
+// ... your header ...
+
+if ( ! defined('ABSPATH') ) exit;
+
+/**
+ * Ensure Markdown parser exists for PUC GitHub release notes
+ * (belt-and-braces even though vendor/ is now committed).
+ */
+if ( ! class_exists('Parsedown') ) {
+    foreach ([
+        __DIR__ . '/inc/plugin-update-checker/vendor/Parsedown.php',
+        __DIR__ . '/inc/plugin-update-checker/vendor/ParsedownModern.php',
+        __DIR__ . '/inc/plugin-update-checker/vendor/erusev/parsedown/Parsedown.php',
+    ] as $pd) {
+        if ( is_readable($pd) ) { require_once $pd; break; }
+    }
+}
 
 /**
  * Plugin Update Checker bootstrap (robust for v5+)
+ * Option A: use tag/branch (no release-asset forcing needed)
  */
 $__puc_loader = __DIR__ . '/inc/plugin-update-checker/plugin-update-checker.php';
 
@@ -20,31 +39,35 @@ if ( file_exists($__puc_loader) ) {
     // Prefer namespaced factory (PUC v5+). Try v5pN first, then v5 fallback.
     if ( class_exists('\YahnisElsts\PluginUpdateChecker\v5p6\PucFactory') ) {
         $cmdb_update_checker = \YahnisElsts\PluginUpdateChecker\v5p6\PucFactory::buildUpdateChecker(
-            'https://github.com/infoitteam/cmdb-endpoints', // <-- your repo
+            'https://github.com/infoitteam/cmdb-endpoints', // repo
             __FILE__,
-            'cmdb-endpoints'
+            'cmdb-endpoints'                                // plugin slug (folder name)
         );
-        $cmdb_update_checker->setBranch('main');           // <-- your branch
-        // $cmdb_update_checker->setAuthentication('ghp_xxx'); // if private repo
+        $cmdb_update_checker->setBranch('main');           // branch to monitor
+
     } elseif ( class_exists('\YahnisElsts\PluginUpdateChecker\v5\PucFactory') ) {
         $cmdb_update_checker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
             'https://github.com/infoitteam/cmdb-endpoints', __FILE__, 'cmdb-endpoints'
         );
         $cmdb_update_checker->setBranch('main');
-        // $cmdb_update_checker->setAuthentication('ghp_xxx');
+
     } elseif ( class_exists('Puc_v5_Factory') ) {
-        // Legacy alias, if present
+        // Legacy alias, if present.
         $cmdb_update_checker = Puc_v5_Factory::buildUpdateChecker(
             'https://github.com/infoitteam/cmdb-endpoints', __FILE__, 'cmdb-endpoints'
         );
         $cmdb_update_checker->setBranch('main');
-        // $cmdb_update_checker->setAuthentication('ghp_xxx');
+
     } else {
         add_action('admin_notices', function () {
             echo '<div class="notice notice-error"><p><strong>CMDB Endpoints:</strong> PUC loaded, but no factory class found. Check inc/plugin-update-checker version.</p></div>';
         });
         error_log('CMDB Endpoints: PUC loader included but no PucFactory class found.');
     }
+
+    // NOTE (Option A): Do NOT force release assets here.
+    // We rely on tag/branch archives now that vendor/ is in the repo.
+
 } else {
     add_action('admin_notices', function () {
         echo '<div class="notice notice-error"><p><strong>CMDB Endpoints:</strong> Missing <code>inc/plugin-update-checker/plugin-update-checker.php</code>. Rebuild/reinstall the plugin.</p></div>';
