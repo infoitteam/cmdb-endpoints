@@ -1,9 +1,10 @@
 <?php
 /**
  * Plugin Name: CMDB Endpoints & Webhooks + Admin Snapshot
- * Description: Exposes /cmdb/v1/snapshot, pushes webhooks on changes, inventories plugins/themes (active+inactive), update/auto-update flags, and adds an Admin Snapshot page (Tools → CMDB Snapshot).
- * Version: 1.4.4
+ * Description: Exposes /cmdb/v1/snapshot, collects plugins/themes (active+inactive), User Accounts, Contact Forms.
+ * Version: 1.5.0
  * Author: Steve O'Rourke
+ * Update URI: https://github.com/infoitteam/cmdb-endpoints
  * Text Domain: cmdb-endpoints
  */
 
@@ -372,6 +373,278 @@ function cmdb_build_users_payload( \WP_REST_Request $req ) {
     ];
 
     return rest_ensure_response( $payload );
+}
+
+
+/**
+ * CF7 component for CMDB Snapshot
+ * - adds: is_active (publish = true), status, fields, mail, embedded_on
+ * - also returns counts for Looker filtering
+ */
+
+add_action('rest_api_init', function () {
+    // Optional: keep the dedicated cf7 endpoint if you want it as well
+    register_rest_route('cmdb/v1', '/cf7', [
+        'methods'  => 'GET',
+        'callback' => 'cmdb_cf7_inventory',
+        'permission_callback' => '__return_true',
+    ]);
+});
+
+/** Public endpoint (optional) */
+function cmdb_cf7_inventory(WP_REST_Request $request) {
+    return rest_ensure_response(cmdb_cf7_component_data());
+}
+
+
+/** Build the CF7 component payload */
+function cmdb_cf7_component_data() {
+    $cf7_main = 'contact-form-7/wp-contact-form-7.php';
+
+    $installed = file_exists(WP_PLUGIN_DIR . '/contact-form-7/wp-contact-form-7.php');
+    include_once ABSPATH . 'wp-admin/includes/plugin.php';
+    $active = function_exists('is_plugin_active') && is_plugin_active($cf7_main);
+
+    // Gather forms (works even if CF7 inactive)
+    $forms = get_posts([
+        'post_type'      => 'wpcf7_contact_form',
+        'posts_per_page' => -1,
+        'post_status'    => ['publish','draft','pending','private'],
+        'orderby'        => 'ID',
+        'order'          => 'ASC',
+        'suppress_filters' => true,
+    ]);
+
+    $out_forms = [];
+    $active_count = 0;
+
+    foreach ($forms as $form) {
+        $form_id    = (int) $form->ID;
+        $title      = $form->post_title;
+        $status     = $form->post_status;
+        $is_active  = ($status === 'publish');
+
+        if ($is_active) $active_count++;
+
+        $out_forms[] = [
+            'id'          => $form_id,
+            'title'       => $title,
+            'status'      => $status,
+            'is_active'   => $is_active, // <<—— for Looker filters
+            'shortcode'   => '[contact-form-7 id="' . $form_id . '" title="' . esc_attr($title) . '"]',
+            'fields'      => cmdb_cf7_extract_fields_always($form_id, $form),
+            'mail'        => cmdb_cf7_mail_settings($form_id),
+            'embedded_on' => cmdb_cf7_find_usages($form_id),
+        ];
+    }
+
+    return [
+        'installed'      => $installed,
+        'active'         => $active,
+        'total_forms'    => count($out_forms),
+        'active_forms'   => $active_count,
+        'inactive_forms' => max(0, count($out_forms) - $active_count),
+        'forms'          => $out_forms,
+    ];
+}
+
+/**
+ * Always extract collected fields (excludes submit/captcha/etc.).
+ */
+function cmdb_cf7_extract_fields_always($form_id, $form_post_obj = null) {
+    $skip_types = ['submit','captcha','recaptcha','free_text','quiz-answers'];
+    $fields = [];
+
+    if (class_exists('WPCF7_ContactForm')) {
+        $form_obj = WPCF7_ContactForm::get_instance($form_id);
+        if ($form_obj && method_exists($form_obj, 'scan_form_tags')) {
+            $tags = $form_obj->scan_form_tags();
+            foreach ($tags as $tag) {
+                $baseType = property_exists($tag, 'basetype') ? strtolower($tag->basetype) : null;
+                $type     = property_exists($tag, 'type') ? strtolower($tag->type) : $baseType;
+                if (!$type) continue;
+
+                $required = method_exists($tag, 'is_required') ? (bool)$tag->is_required() : (substr($type, -1) === '*');
+                $clean_type = rtrim($type, '*');
+                $clean_base = $baseType ? rtrim($baseType, '*') : $clean_type;
+
+                if (in_array($clean_base, $skip_types, true)) continue;
+
+                $name        = property_exists($tag, 'name') ? (string)$tag->name : '';
+                $values      = property_exists($tag, 'values') ? array_values((array)$tag->values) : [];
+                $raw_values  = property_exists($tag, 'raw_values') ? array_values((array)$tag->raw_values) : [];
+                $options_arr = property_exists($tag, 'options') ? (array)$tag->options : [];
+
+                $placeholder = null;
+                if (method_exists($tag, 'get_option')) {
+                    $ph = $tag->get_option('placeholder','.*',true);
+                    if (!empty($ph)) $placeholder = is_array($ph) ? implode(' ',$ph) : (string)$ph;
+                }
+
+                $fields[] = [
+                    'name'        => $name,
+                    'type'        => $clean_type,
+                    'base_type'   => $clean_base,
+                    'required'    => $required,
+                    'values'      => $values,
+                    'raw_values'  => $raw_values,
+                    'options'     => array_values($options_arr),
+                    'placeholder' => $placeholder,
+                ];
+            }
+            return $fields;
+        }
+    }
+
+    // Fallback: parse stored form content (_form or post_content)
+    $content = get_post_meta($form_id, '_form', true);
+    if (!is_string($content) || $content === '') {
+        if (is_object($form_post_obj) && isset($form_post_obj->post_content)) {
+            $content = (string)$form_post_obj->post_content;
+        } else {
+            $p = get_post($form_id);
+            $content = $p ? (string)$p->post_content : '';
+        }
+    }
+    if ($content === '') return $fields;
+
+    $pattern = '/\[(?P<type>[a-zA-Z0-9_+-]+)(?P<star>\*)?\s+(?P<name>[A-Za-z0-9_\-]+)(?P<rest>[^\]]*)\]/m';
+    if (preg_match_all($pattern, $content, $matches, PREG_SET_ORDER)) {
+        foreach ($matches as $m) {
+            $type      = strtolower($m['type']);
+            $required  = ($m['star'] === '*');
+            $name      = $m['name'];
+            $rest      = trim($m['rest']);
+
+            if (in_array($type, $skip_types, true)) continue;
+
+            $tokens = [];
+            preg_match_all('/"[^"]*"|\S+/', $rest, $tokm);
+            if (!empty($tokm[0])) foreach ($tokm[0] as $tok) $tokens[] = trim($tok, "\"");
+
+            $options = [];
+            $values  = [];
+            $placeholder = null;
+
+            foreach ($tokens as $tok) {
+                if (strpos($tok, ':') !== false) {
+                    list($k, $v) = array_map('trim', explode(':', $tok, 2));
+                    $options[$k] = $v;
+                    if (strtolower($k) === 'placeholder') $placeholder = $v;
+                } else {
+                    $values[] = $tok;
+                }
+            }
+
+            $fields[] = [
+                'name'        => $name,
+                'type'        => rtrim($type, '*'),
+                'base_type'   => rtrim($type, '*'),
+                'required'    => $required,
+                'values'      => $values,
+                'raw_values'  => $values,
+                'options'     => $options,
+                'placeholder' => $placeholder,
+            ];
+        }
+    }
+    return $fields;
+}
+
+/** Mail settings via CF7 API or postmeta */
+function cmdb_cf7_mail_settings($form_id) {
+    if (class_exists('WPCF7_ContactForm')) {
+        $form_obj = WPCF7_ContactForm::get_instance($form_id);
+        if ($form_obj && method_exists($form_obj, 'prop')) {
+            $mail   = (array)$form_obj->prop('mail');
+            $mail_2 = (array)$form_obj->prop('mail_2');
+            return [
+                'sender'             => $mail['sender'] ?? null,
+                'recipient'          => $mail['recipient'] ?? null,
+                'subject'            => $mail['subject'] ?? null,
+                'additional_headers' => $mail['additional_headers'] ?? null,
+                'use_html'           => isset($mail['use_html']) ? (bool)$mail['use_html'] : null,
+                'body'               => $mail['body'] ?? null,
+                'mail_2' => [
+                    'active'            => !empty($mail_2) && (!empty($mail_2['active']) || !empty($mail_2['recipient']) || !empty($mail_2['body'])),
+                    'sender'            => $mail_2['sender'] ?? null,
+                    'recipient'         => $mail_2['recipient'] ?? null,
+                    'subject'           => $mail_2['subject'] ?? null,
+                    'additional_headers'=> $mail_2['additional_headers'] ?? null,
+                    'use_html'          => isset($mail_2['use_html']) ? (bool)$mail_2['use_html'] : null,
+                    'body'              => $mail_2['body'] ?? null,
+                ],
+            ];
+        }
+    }
+    $mail   = get_post_meta($form_id, '_mail', true);
+    $mail_2 = get_post_meta($form_id, '_mail_2', true);
+    $mail   = is_array($mail) ? $mail : [];
+    $mail_2 = is_array($mail_2) ? $mail_2 : [];
+    return [
+        'sender'             => $mail['sender'] ?? null,
+        'recipient'          => $mail['recipient'] ?? null,
+        'subject'            => $mail['subject'] ?? null,
+        'additional_headers' => $mail['additional_headers'] ?? null,
+        'use_html'           => isset($mail['use_html']) ? (bool)$mail['use_html'] : null,
+        'body'               => $mail['body'] ?? null,
+        'mail_2' => [
+            'active'            => isset($mail_2['active']) ? (bool)$mail_2['active'] : (!empty($mail_2) ? true : false),
+            'sender'            => $mail_2['sender'] ?? null,
+            'recipient'         => $mail_2['recipient'] ?? null,
+            'subject'           => $mail_2['subject'] ?? null,
+            'additional_headers'=> $mail_2['additional_headers'] ?? null,
+            'use_html'          => isset($mail_2['use_html']) ? (bool)$mail_2['use_html'] : null,
+            'body'              => $mail_2['body'] ?? null,
+        ],
+    ];
+}
+
+/** Find pages/posts embedding the form (shortcode or Gutenberg block) */
+function cmdb_cf7_find_usages($form_id) {
+    global $wpdb;
+    $id = (int) $form_id;
+
+    // Build LIKE patterns safely (add wildcards yourself; prepare() will quote/escape)
+    $like_shortcode_dq = $wpdb->esc_like('[contact-form-7') . '%id="' . $id . '"%';
+    $like_shortcode_sq = $wpdb->esc_like('[contact-form-7') . "%id='" . $id . "'%";
+    $like_block_id     = '%"id":' . $id . '%'; // Gutenberg block JSON contains this
+
+    // Search a reasonable set of content post types
+    $post_types = esc_sql(['page','post','elementor_library','wp_block','wp_template','wp_template_part']);
+    $types_in   = "'" . implode("','", $post_types) . "'";
+
+    // Build SQL with placeholders for the LIKEs
+    $sql = "
+        SELECT ID, post_title, post_status, post_type
+        FROM {$wpdb->posts}
+        WHERE post_type IN ($types_in)
+          AND post_status IN ('publish','draft','pending','private')
+          AND (
+                post_content LIKE %s
+             OR post_content LIKE %s
+             OR post_content LIKE %s
+          )
+        ORDER BY post_type, ID ASC
+    ";
+
+    // Prepare with the 3 dynamic LIKE patterns
+    $prepared = $wpdb->prepare($sql, $like_shortcode_dq, $like_shortcode_sq, $like_block_id);
+    $rows = $wpdb->get_results($prepared);
+
+    $out = [];
+    if ($rows) {
+        foreach ($rows as $r) {
+            $out[] = [
+                'id'     => (int) $r->ID,
+                'type'   => $r->post_type,
+                'status' => $r->post_status,
+                'title'  => $r->post_title,
+                'url'    => get_permalink($r->ID),
+            ];
+        }
+    }
+    return $out;
 }
 
 
