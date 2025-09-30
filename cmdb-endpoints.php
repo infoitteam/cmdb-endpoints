@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: CMDB Endpoints & Webhooks + Admin Snapshot
+ * Plugin Name: CMDB Endpoints for Google Scripts
  * Description: Exposes /cmdb/v1/snapshot, collects plugins/themes (active+inactive), User Accounts, Contact Forms.
- * Version: 1.5.1
+ * Version: 1.5.2
  * Author: Steve O'Rourke
  * Update URI: https://github.com/infoitteam/cmdb-endpoints
  * Text Domain: cmdb-endpoints
@@ -605,47 +605,144 @@ function cmdb_cf7_find_usages($form_id) {
     global $wpdb;
     $id = (int) $form_id;
 
-    // Build LIKE patterns safely (add wildcards yourself; prepare() will quote/escape)
-    $like_shortcode_dq = $wpdb->esc_like('[contact-form-7') . '%id="' . $id . '"%';
-    $like_shortcode_sq = $wpdb->esc_like('[contact-form-7') . "%id='" . $id . "'%";
-    $like_block_id     = '%"id":' . $id . '%'; // Gutenberg block JSON contains this
+    // Pull title + slug so we can match id="<id>", id="<slug>", and title="..."
+    $form_post = get_post($id);
+    $title = $form_post ? (string) $form_post->post_title : '';
+    $slug  = $form_post ? (string) $form_post->post_name  : '';
 
-    // Search a reasonable set of content post types
+    // Helper for like
+    $like = static function ($s) use ($wpdb) { return $wpdb->esc_like($s); };
+
+    // Patterns (don’t add quotes here; prepare will)
+    $sc_id_dq   = $like('[contact-form-7') . '%id="' . $id . '"%';
+    $sc_id_sq   = $like('[contact-form-7') . "%id='" . $id . "'%";
+    $block_id   = '%"id":' . $id . '%'; // Gutenberg block comment
+    $block_title= $title !== '' ? ('%\"title\":\"' . $like($title) . '\"%') : null;
+
+    // Title-based shortcode patterns
+    $sc_title_dq = $title !== '' ? ('%title="' . $like($title) . '"%') : null;
+    $sc_title_sq = $title !== '' ? ("%title='" . $like($title) . "'%") : null;
+
+    // Some content uses the form "slug" (post_name) in id=
+    $sc_slug_dq  = $slug  !== '' ? ($like('[contact-form-7') . '%id="' . $like($slug) . '"%') : null;
+    $sc_slug_sq  = $slug  !== '' ? ($like('[contact-form-7') . "%id='" . $like($slug) . "'%") : null;
+
+    // Elementor JSON (_elementor_data) can have either a widget {"form_id":123} or the shortcode text
+    $elem_formid      = '%"form_id":' . $id . '%';
+    $elem_sc_id_dq    = '%[contact-form-7%id="' . $id . '"%';
+    $elem_sc_id_sq    = "%[contact-form-7%id='" . $id . "'%";
+    $elem_sc_title_dq = $title !== '' ? ('%[contact-form-7%title="' . $like($title) . '"%') : null;
+    $elem_sc_title_sq = $title !== '' ? ("%[contact-form-7%title='" . $like($title) . "'%") : null;
+    $elem_sc_slug_dq  = $slug  !== '' ? ('%[contact-form-7%id="' . $like($slug) . '"%') : null;
+    $elem_sc_slug_sq  = $slug  !== '' ? ("%[contact-form-7%id='" . $like($slug) . "'%") : null;
+
+    // Any postmeta (ACF/custom fields)
+    $meta_sc_id_dq    = $elem_sc_id_dq;
+    $meta_sc_id_sq    = $elem_sc_id_sq;
+    $meta_sc_title_dq = $elem_sc_title_dq;
+    $meta_sc_title_sq = $elem_sc_title_sq;
+    $meta_sc_slug_dq  = $elem_sc_slug_dq;
+    $meta_sc_slug_sq  = $elem_sc_slug_sq;
+
+    // Post types to scan
     $post_types = esc_sql(['page','post','elementor_library','wp_block','wp_template','wp_template_part']);
     $types_in   = "'" . implode("','", $post_types) . "'";
 
-    // Build SQL with placeholders for the LIKEs
-    $sql = "
-        SELECT ID, post_title, post_status, post_type
-        FROM {$wpdb->posts}
-        WHERE post_type IN ($types_in)
-          AND post_status IN ('publish','draft','pending','private')
-          AND (
-                post_content LIKE %s
-             OR post_content LIKE %s
-             OR post_content LIKE %s
-          )
-        ORDER BY post_type, ID ASC
+    // --- Build post_content query (conditions + args arrays) ---
+    $conds_posts = [];
+    $args_posts  = [];
+
+    $conds_posts[] = 'p.post_content LIKE %s';           $args_posts[] = $sc_id_dq;
+    $conds_posts[] = 'p.post_content LIKE %s';           $args_posts[] = $sc_id_sq;
+    $conds_posts[] = "(p.post_content LIKE '%wp:wpcf7/contact-form%' AND p.post_content LIKE %s)";
+                                                       $args_posts[] = $block_id;
+    if ($block_title) { $conds_posts[] = 'p.post_content LIKE %s'; $args_posts[] = $block_title; }
+    if ($sc_title_dq) { $conds_posts[] = 'p.post_content LIKE %s'; $args_posts[] = $sc_title_dq; }
+    if ($sc_title_sq) { $conds_posts[] = 'p.post_content LIKE %s'; $args_posts[] = $sc_title_sq; }
+    if ($sc_slug_dq)  { $conds_posts[] = 'p.post_content LIKE %s'; $args_posts[] = $sc_slug_dq; }
+    if ($sc_slug_sq)  { $conds_posts[] = 'p.post_content LIKE %s'; $args_posts[] = $sc_slug_sq; }
+
+    $sql_posts = "
+        SELECT p.ID, p.post_title, p.post_status, p.post_type
+        FROM {$wpdb->posts} p
+        WHERE p.post_type IN ($types_in)
+          AND p.post_status IN ('publish','draft','pending','private')
+          AND (" . implode(' OR ', $conds_posts) . ")
+    ";
+    $sql_posts = $wpdb->prepare($sql_posts, $args_posts);
+
+    // --- Elementor _elementor_data postmeta ---
+    $conds_elem = [];
+    $args_elem  = [];
+
+    $conds_elem[] = 'pm.meta_value LIKE %s';  $args_elem[] = $elem_formid;
+    $conds_elem[] = 'pm.meta_value LIKE %s';  $args_elem[] = $elem_sc_id_dq;
+    $conds_elem[] = 'pm.meta_value LIKE %s';  $args_elem[] = $elem_sc_id_sq;
+    if ($elem_sc_title_dq) { $conds_elem[] = 'pm.meta_value LIKE %s'; $args_elem[] = $elem_sc_title_dq; }
+    if ($elem_sc_title_sq) { $conds_elem[] = 'pm.meta_value LIKE %s'; $args_elem[] = $elem_sc_title_sq; }
+    if ($elem_sc_slug_dq)  { $conds_elem[] = 'pm.meta_value LIKE %s'; $args_elem[] = $elem_sc_slug_dq; }
+    if ($elem_sc_slug_sq)  { $conds_elem[] = 'pm.meta_value LIKE %s'; $args_elem[] = $elem_sc_slug_sq; }
+
+    $sql_elem = "
+        SELECT p.ID, p.post_title, p.post_status, p.post_type
+        FROM {$wpdb->posts} p
+        INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = '_elementor_data'
+        WHERE p.post_type IN ($types_in)
+          AND p.post_status IN ('publish','draft','pending','private')
+          AND (" . implode(' OR ', $conds_elem) . ")
+    ";
+    $sql_elem = $wpdb->prepare($sql_elem, $args_elem);
+
+    // --- Any postmeta (ACF/custom) ---
+    $conds_any = [];
+    $args_any  = [];
+
+    $conds_any[] = 'pm.meta_value LIKE %s';  $args_any[] = $meta_sc_id_dq;
+    $conds_any[] = 'pm.meta_value LIKE %s';  $args_any[] = $meta_sc_id_sq;
+    if ($meta_sc_title_dq) { $conds_any[] = 'pm.meta_value LIKE %s'; $args_any[] = $meta_sc_title_dq; }
+    if ($meta_sc_title_sq) { $conds_any[] = 'pm.meta_value LIKE %s'; $args_any[] = $meta_sc_title_sq; }
+    if ($meta_sc_slug_dq)  { $conds_any[] = 'pm.meta_value LIKE %s'; $args_any[] = $meta_sc_slug_dq; }
+    if ($meta_sc_slug_sq)  { $conds_any[] = 'pm.meta_value LIKE %s'; $args_any[] = $meta_sc_slug_sq; }
+
+    $sql_any = "
+        SELECT p.ID, p.post_title, p.post_status, p.post_type
+        FROM {$wpdb->posts} p
+        INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID
+        WHERE p.post_type IN ($types_in)
+          AND p.post_status IN ('publish','draft','pending','private')
+          AND (" . implode(' OR ', $conds_any) . ")
+    ";
+    $sql_any = $wpdb->prepare($sql_any, $args_any);
+
+    // --- UNION the 3 prepared subqueries ---
+    $union = "
+        SELECT * FROM (
+            {$sql_posts}
+            UNION
+            {$sql_elem}
+            UNION
+            {$sql_any}
+        ) AS u
+        GROUP BY u.ID
+        ORDER BY u.post_type, u.ID ASC
     ";
 
-    // Prepare with the 3 dynamic LIKE patterns
-    $prepared = $wpdb->prepare($sql, $like_shortcode_dq, $like_shortcode_sq, $like_block_id);
-    $rows = $wpdb->get_results($prepared);
+    $rows = $wpdb->get_results($union);
 
     $out = [];
-    if ($rows) {
-        foreach ($rows as $r) {
-            $out[] = [
-                'id'     => (int) $r->ID,
-                'type'   => $r->post_type,
-                'status' => $r->post_status,
-                'title'  => $r->post_title,
-                'url'    => get_permalink($r->ID),
-            ];
-        }
+    foreach ((array) $rows as $r) {
+        $out[] = [
+            'id'     => (int) $r->ID,
+            'type'   => $r->post_type,
+            'status' => $r->post_status,
+            'title'  => $r->post_title,
+            'url'    => get_permalink($r->ID),
+        ];
     }
     return $out;
 }
+
+
 
 
 /** Webhook push **/
