@@ -2,7 +2,7 @@
 /**
  * Plugin Name: CMDB Endpoints & Webhooks + Admin Snapshot
  * Description: Exposes /cmdb/v1/snapshot, collects plugins/themes (active+inactive), User Accounts, Contact Forms.
- * Version: 1.5.0
+ * Version: 1.5.1
  * Author: Steve O'Rourke
  * Update URI: https://github.com/infoitteam/cmdb-endpoints
  * Text Domain: cmdb-endpoints
